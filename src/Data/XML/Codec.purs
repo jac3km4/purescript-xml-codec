@@ -1,5 +1,7 @@
 module Data.XML.Codec
   ( Codec
+  , Error(..)
+  , History
   , NodeCodec
   , RecordCodec
   , NodeFragment
@@ -20,7 +22,8 @@ import Prelude
 
 import Control.Bind (bindFlipped)
 import Data.Array as Array
-import Data.Either (Either, note, note')
+import Data.Bifunctor (lmap)
+import Data.Either (Either, note')
 import Data.Functor.Invariant (class Invariant, imap)
 import Data.Functor.Monoidal (class Monoidal, class Semigroupal)
 import Data.Int as Int
@@ -35,25 +38,34 @@ import Prim.RowList as RL
 import Record.Invariant (class SequenceRecord, sequenceIR)
 
 newtype Codec i o a = Codec
-  { read :: i -> Either String a
+  { read :: History -> i -> Either Error a
   , write :: a -> o
   }
 
 instance Invariant (Codec i o) where
   imap fn fn' (Codec fa) = Codec
-    { read: map fn <<< fa.read
+    { read: \hs -> map fn <<< fa.read hs
     , write: fa.write <<< fn'
     }
 
 instance Semigroup o => Semigroupal (Codec i o) where
   fproduct (Codec fa) (Codec fb) = Codec
-    { read: \inp -> Tuple <$> fa.read inp <*> fb.read inp
+    { read: \hs inp -> Tuple <$> fa.read hs inp <*> fb.read hs inp
     , write: \(Tuple a b) -> fa.write a <> fb.write b
     }
 
 instance Monoid o => Monoidal (Codec i o) where
-  funit = Codec { read: const $ pure unit, write: const mempty }
+  funit = Codec { read: const $ const $ pure unit, write: const mempty }
 
+newtype Error = Error
+  { history :: History
+  , cause :: String
+  }
+
+derive newtype instance Eq Error
+derive newtype instance Show Error
+
+type History = Array String
 type NodeCodec = Codec Xml (Array NodeFragment)
 type RecordCodec = Codec Xml (Array Node)
 
@@ -63,39 +75,64 @@ data NodeFragment
 
 data Node = Node String (Array NodeFragment)
 
-codec :: ∀ a. (Xml -> Either String a) -> (a -> NodeFragment) -> NodeCodec a
+-- | Create a codec from decode and encode functions
+codec :: ∀ a. (History -> Xml -> Either Error a) -> (a -> NodeFragment) -> NodeCodec a
 codec read write = Codec { read, write: pure <<< write }
 
+-- | Retrieve text content of the current node
 content :: NodeCodec String
-content = codec (note "Node has no content" <<< XML.text) Content
+content = codec (\hs -> note' (error hs) <<< XML.text) Content
+  where
+  error history _ = Error { history, cause: "Node content is missing" }
 
+-- | Retrieve a named attribute of the current node
 attr :: String -> NodeCodec String
-attr name = codec (note "Node has no attribute" <<< XML.attr name) (Attr name)
+attr name = codec (\hs -> note' (error (Array.snoc hs name)) <<< XML.attr name) (Attr name)
+  where
+  error history _ = Error { history, cause: "Attribute is missing" }
 
+-- | Retrieve the first direct child by tag of the current node
 tag :: ∀ a. String -> NodeCodec a -> RecordCodec a
 tag name (Codec fa) = Codec
-  { read: bindFlipped fa.read
-      <<< note' (\_ -> "No node for tag " <> name)
-      <<< Array.head
-      <<< XML.directChildrenByTag name
+  { read: \hs ->
+      bindFlipped (fa.read (Array.snoc hs name))
+        <<< note' (error hs)
+        <<< Array.head
+        <<< XML.directChildrenByTag name
   , write: pure <<< Node name <<< fa.write
   }
+  where
+  error history _ = Error { history, cause: "No node found for tag " <> name }
 
+-- | Retrieve all direct children by tag of the current node
 tags :: ∀ a. String -> NodeCodec a -> RecordCodec (Array a)
 tags name (Codec fa) = Codec
-  { read: traverse fa.read <<< XML.directChildrenByTag name
+  { read
   , write: map (Node name <<< fa.write)
   }
+  where
+  read hs =
+    let
+      hs' = Array.snoc hs name
+    in
+      traverse (fa.read hs') <<< XML.directChildrenByTag name
 
+-- | Parse output of the codec into an integer
 int :: ∀ i o. Codec i o String -> Codec i o Int
 int (Codec fa) = Codec
-  { read: bindFlipped (note "Invalid int" <<< Int.fromString) <<< fa.read
+  { read: \hs -> bindFlipped (note' (error hs) <<< Int.fromString) <<< fa.read hs
   , write: fa.write <<< show
   }
+  where
+  error history _ = Error { history, cause: "Invalid int" }
 
-decode :: ∀ a. RecordCodec a -> String -> Either String a
-decode (Codec fa) str = fa.read =<< XML.parse str
+-- | Parse XML string using a codec
+decode :: ∀ a. RecordCodec a -> String -> Either Error a
+decode (Codec fa) str = fa.read [] =<< lmap error (XML.parse str)
+  where
+  error cause = Error { history: [], cause }
 
+-- | Encode a record into an array of XML nodes
 encode :: ∀ a. RecordCodec a -> a -> Array Xml
 encode (Codec fa) val = mkNode <$> fa.write val
   where
@@ -107,6 +144,7 @@ encode (Codec fa) val = mkNode <$> fa.write val
         Content txt -> XML.setTextContent txt el
     pure el
 
+-- | Turn a record of codecs into a codec of a record
 rec
   :: ∀ row row' rl m
    . RL.RowToList row rl
@@ -115,12 +153,12 @@ rec
   -> m (Record row')
 rec = sequenceIR
 
+-- | Turn a record of codecs into a codec of a record wrapped with a newtype
 recNewt
   :: ∀ row row' rl m nt
    . RL.RowToList row rl
   => SequenceRecord rl row row' m
   => Newtype nt (Record row')
-  => Invariant m
   => Record row
   -> m nt
 recNewt = imap wrap unwrap <<< sequenceIR

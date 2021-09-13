@@ -28,7 +28,7 @@ exports._parse = (err, succ, str) => {
 
 exports._stringify = (node) => serializer.serializeToString(node);
 
-exports._getAttribute = (name, el) => el.getAttribute(name);
+exports._getAttribute = (name, el) => el.getAttribute(name) || undefined;
 exports._getContent = (el) => el.textContent;
 exports._getElementsByTag = (tag, el) => el.getElementsByTagName(tag);
 exports._getChildrenByTag = (tag, el) => el.children.filter(e => e.tagName == tag);
