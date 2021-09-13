@@ -35,15 +35,15 @@ main = do
   testTwo
 
   where
-  validEmployee = """<guy><job position="boss" salary="120"/><name>John</name></guy>"""
-  invalidEmployee = """<guy><job position="boss" saraly="120"/><name>John</name></guy>"""
+  validEmployee = """<employee><job position="boss" salary="120"/><name>John</name></employee>"""
+  invalidEmployee = """<employee><job position="boss" saraly="120"/><name>John</name></employee>"""
 
   testOne = do
-    let (guy :: Either C.Error Employee) = C.decode employeeCodec validEmployee
-    assertEqual { actual: guy, expected: Right $ Employee { name: "John", job: { position: "boss", salary: 120 } } }
-    let xml = map (XML.stringify <<< XML.node "guy" <<< C.encode employeeCodec) guy
+    let (employee :: Either C.Error Employee) = C.decode employeeCodec validEmployee
+    assertEqual { actual: employee, expected: Right $ Employee { name: "John", job: { position: "boss", salary: 120 } } }
+    let xml = map (XML.stringify <<< XML.node "employee" <<< C.encode employeeCodec) employee
     assertEqual { actual: xml, expected: Right validEmployee }
 
   testTwo = do
-    let (guy :: Either C.Error Employee) = C.decode employeeCodec invalidEmployee
-    assertEqual { actual: guy, expected: Left (C.Error { history: [ "job", "salary" ], cause: "Attribute is missing" }) }
+    let (employee :: Either C.Error Employee) = C.decode employeeCodec invalidEmployee
+    assertEqual { actual: employee, expected: Left (C.Error { history: [ "job", "salary" ], cause: "Attribute is missing" }) }

@@ -23,7 +23,7 @@ derive newtype instance Show Employee
 -- codecs are defined by defining records that map every field to a codec
 -- `rec` applies to records and `recNewt` applies to newtype-wrapped records
 -- all codecs are Invariant Monoidals, offering generic combinators like `imap` and `fproduct`
--- this will parse XML input like: '<guy><job position="boss" salary="120"/><name>John</name></guy>'
+-- this will parse XML input like: '<employee><job position="boss" salary="120"/><name>John</name></employee>'
 employeeCodec :: C.RecordCodec Employee
 employeeCodec = C.recNewt
   { name: C.tag "name" C.content
