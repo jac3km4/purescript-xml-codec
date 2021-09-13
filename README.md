@@ -22,13 +22,13 @@ derive instance Newtype Employee _
 -- `rec` applies to records and `recNewt` applies to newtype-wrapped records
 -- all codecs are Invariant Monoidals, offering generic combinators like `imap` and `fproduct`
 -- this will decode XML input like: '<employee><job position="boss" salary="120"/><name>John</name></employee>'
-employeeCodec :: C.RecordCodec Employee
+employeeCodec :: C.NodeCodec Employee
 employeeCodec = C.recNewt
   { name: C.tag "name" C.content
-  , job: C.tag "job" positionCodec
+  , job: C.tag "job" jobCodec
   }
   where
-  positionCodec = C.rec
+  jobCodec = C.rec
     { position: C.attr "position"
     , salary: C.int $ C.attr "salary"
     }

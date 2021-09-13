@@ -9,6 +9,7 @@ module Data.XML.Codec
   , content
   , attr
   , tag
+  , tagOpt
   , tags
   , int
   , decode
@@ -26,8 +27,9 @@ import Data.Either (Either, note')
 import Data.Functor.Invariant (class Invariant, imap)
 import Data.Functor.Monoidal (class Monoidal, class Semigroupal)
 import Data.Int as Int
+import Data.Maybe (Maybe)
 import Data.Newtype (class Newtype, unwrap, wrap)
-import Data.Traversable (traverse)
+import Data.Traversable (foldMap, traverse)
 import Data.Tuple (Tuple(..))
 import Data.XML (Xml)
 import Data.XML as XML
@@ -103,6 +105,17 @@ tag name (Codec fa) = Codec { read, write }
     pure <<< Child <<< Node name <<< fa.write
   error history _ =
     Error { history, cause: "No node found for tag " <> name }
+
+-- | Retrieve the first direct child by tag of the current node if it's present
+tagOpt :: ∀ a. String -> NodeCodec a -> NodeCodec (Maybe a)
+tagOpt name (Codec fa) = Codec { read, write }
+  where
+  read hs =
+    traverse (fa.read (Array.snoc hs name))
+      <<< Array.head
+      <<< XML.directChildrenByTag name
+  write =
+    foldMap (pure <<< Child <<< Node name <<< fa.write)
 
 -- | Retrieve all direct children by tag of the current node
 tags :: ∀ a. String -> NodeCodec a -> NodeCodec (Array a)
