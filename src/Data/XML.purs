@@ -11,6 +11,7 @@ module Data.XML
   , createElement
   , setAttribute
   , setTextContent
+  , appendChild
   ) where
 
 import Prelude
@@ -62,7 +63,7 @@ directChildrenByTag name = runFn2 _getElementsByTag name
 node :: String -> Array Xml -> Xml
 node name docs = unsafePerformEffect do
   el <- createElement name
-  foreachE docs \child -> runEffectFn2 _appendChild child el
+  foreachE docs (flip appendChild el)
   pure el
 
 createElement :: String -> Effect Xml
@@ -73,3 +74,6 @@ setAttribute name = runEffectFn3 _setAttribute name
 
 setTextContent :: String -> Xml -> Effect Unit
 setTextContent content = runEffectFn2 _setTextContent content
+
+appendChild :: Xml -> Xml -> Effect Unit
+appendChild child target = runEffectFn2 _appendChild child target

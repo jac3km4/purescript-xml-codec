@@ -18,13 +18,13 @@ derive instance Newtype Employee _
 derive newtype instance Eq Employee
 derive newtype instance Show Employee
 
-employeeCodec :: C.RecordCodec Employee
+employeeCodec :: C.NodeCodec Employee
 employeeCodec = C.recNewt
   { name: C.tag "name" C.content
-  , job: C.tag "job" positionCodec
+  , job: C.tag "job" jobCodec
   }
   where
-  positionCodec = C.rec
+  jobCodec = C.rec
     { position: C.attr "position"
     , salary: C.int $ C.attr "salary"
     }
@@ -41,7 +41,7 @@ main = do
   testOne = do
     let (employee :: Either C.Error Employee) = C.decode employeeCodec validEmployee
     assertEqual { actual: employee, expected: Right $ Employee { name: "John", job: { position: "boss", salary: 120 } } }
-    let xml = map (XML.stringify <<< XML.node "employee" <<< C.encode employeeCodec) employee
+    let xml = map (XML.stringify <<< C.encode "employee" employeeCodec) employee
     assertEqual { actual: xml, expected: Right validEmployee }
 
   testTwo = do

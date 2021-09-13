@@ -3,7 +3,6 @@ module Data.XML.Codec
   , Error(..)
   , History
   , NodeCodec
-  , RecordCodec
   , NodeFragment
   , Node
   , codec
@@ -67,11 +66,11 @@ derive newtype instance Show Error
 
 type History = Array String
 type NodeCodec = Codec Xml (Array NodeFragment)
-type RecordCodec = Codec Xml (Array Node)
 
 data NodeFragment
   = Attr String String
   | Content String
+  | Child Node
 
 data Node = Node String (Array NodeFragment)
 
@@ -92,56 +91,59 @@ attr name = codec (\hs -> note' (error (Array.snoc hs name)) <<< XML.attr name) 
   error history _ = Error { history, cause: "Attribute is missing" }
 
 -- | Retrieve the first direct child by tag of the current node
-tag :: ∀ a. String -> NodeCodec a -> RecordCodec a
-tag name (Codec fa) = Codec
-  { read: \hs ->
-      bindFlipped (fa.read (Array.snoc hs name))
-        <<< note' (error hs)
-        <<< Array.head
-        <<< XML.directChildrenByTag name
-  , write: pure <<< Node name <<< fa.write
-  }
+tag :: ∀ a. String -> NodeCodec a -> NodeCodec a
+tag name (Codec fa) = Codec { read, write }
   where
-  error history _ = Error { history, cause: "No node found for tag " <> name }
+  read hs =
+    bindFlipped (fa.read (Array.snoc hs name))
+      <<< note' (error hs)
+      <<< Array.head
+      <<< XML.directChildrenByTag name
+  write =
+    pure <<< Child <<< Node name <<< fa.write
+  error history _ =
+    Error { history, cause: "No node found for tag " <> name }
 
 -- | Retrieve all direct children by tag of the current node
-tags :: ∀ a. String -> NodeCodec a -> RecordCodec (Array a)
-tags name (Codec fa) = Codec
-  { read
-  , write: map (Node name <<< fa.write)
-  }
+tags :: ∀ a. String -> NodeCodec a -> NodeCodec (Array a)
+tags name (Codec fa) = Codec { read, write }
   where
   read hs =
     let
       hs' = Array.snoc hs name
     in
       traverse (fa.read hs') <<< XML.directChildrenByTag name
+  write =
+    map (Child <<< Node name <<< fa.write)
 
 -- | Parse output of the codec into an integer
 int :: ∀ i o. Codec i o String -> Codec i o Int
-int (Codec fa) = Codec
-  { read: \hs -> bindFlipped (note' (error hs) <<< Int.fromString) <<< fa.read hs
-  , write: fa.write <<< show
-  }
+int (Codec fa) = Codec { read, write }
   where
-  error history _ = Error { history, cause: "Invalid int" }
+  read hs =
+    bindFlipped (note' (error hs) <<< Int.fromString) <<< fa.read hs
+  write =
+    fa.write <<< show
+  error history _ =
+    Error { history, cause: "Invalid int" }
 
 -- | Parse XML string using a codec
-decode :: ∀ a. RecordCodec a -> String -> Either Error a
+decode :: ∀ a. NodeCodec a -> String -> Either Error a
 decode (Codec fa) str = fa.read [] =<< lmap error (XML.parse str)
   where
   error cause = Error { history: [], cause }
 
--- | Encode a record into an array of XML nodes
-encode :: ∀ a. RecordCodec a -> a -> Array Xml
-encode (Codec fa) val = mkNode <$> fa.write val
+-- | Encode a value wrapped with the given tag
+encode :: ∀ a. String -> NodeCodec a -> a -> Xml
+encode tagName (Codec fa) = mkNode <<< Node tagName <<< fa.write
   where
-  mkNode (Node tagName frags) = unsafePerformEffect do
-    el <- XML.createElement tagName
+  mkNode (Node tagName' frags) = unsafePerformEffect do
+    el <- XML.createElement tagName'
     foreachE frags \frag ->
       case frag of
         Attr name txt -> XML.setAttribute name txt el
         Content txt -> XML.setTextContent txt el
+        Child node -> XML.appendChild (mkNode node) el
     pure el
 
 -- | Turn a record of codecs into a codec of a record
